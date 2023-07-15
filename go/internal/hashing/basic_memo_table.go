@@ -6,14 +6,14 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-type BasicMemoTable[T constraints.Integer] struct {
+type BasicMemoTable[T constraints.Integer | constraints.Float] struct {
 	tbl     *HashTable[T]
 	nullIdx int32
 }
 
 // NewBasicMemoTable[T] returns a new memotable with num entries pre-allocated to reduce further
 // allocations when inserting.
-func NewBasicMemoTable[T constraints.Integer](num int64) *BasicMemoTable[T] {
+func NewBasicMemoTable[T constraints.Integer | constraints.Float](num int64) *BasicMemoTable[T] {
 	return &BasicMemoTable[T]{tbl: NewHashTable[T](uint64(num)), nullIdx: KeyNotFound}
 }
 
