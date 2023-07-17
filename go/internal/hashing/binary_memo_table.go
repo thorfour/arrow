@@ -2,11 +2,14 @@ package hashing
 
 import (
 	"bytes"
-	"reflect"
 	"unsafe"
 )
 
-type BinaryBuilder[T []byte | string] interface {
+type BinaryType interface {
+	[]byte | string
+}
+
+type BinaryBuilder[T BinaryType] interface {
 	Reserve(int)
 	ReserveData(int)
 	Retain()
@@ -20,8 +23,8 @@ type BinaryBuilder[T []byte | string] interface {
 	Append(T)
 }
 
-type GenericBinaryMemoTable[T []byte | string] struct {
-	tbl     *Int32HashTable
+type GenericBinaryMemoTable[T BinaryType] struct {
+	tbl     *HashTable[int32]
 	builder BinaryBuilder[T]
 	nullIdx int
 }
@@ -31,14 +34,14 @@ type GenericBinaryMemoTable[T []byte | string] struct {
 // initial and valuesize can be used to pre-allocate the table to reduce allocations. With
 // initial being the initial number of entries to allocate for and valuesize being the starting
 // amount of space allocated for writing the actual binary data.
-func NewGenericBinaryMemoTable[T []byte | string](initial, valuesize int, bldr BinaryBuilder[T]) *GenericBinaryMemoTable[T] {
+func NewGenericBinaryMemoTable[T BinaryType](initial, valuesize int, bldr BinaryBuilder[T]) *GenericBinaryMemoTable[T] {
 	bldr.Reserve(int(initial))
 	datasize := valuesize
 	if datasize <= 0 {
 		datasize = initial * 4
 	}
 	bldr.ReserveData(datasize)
-	return &GenericBinaryMemoTable[T]{tbl: NewInt32HashTable(uint64(initial)), builder: bldr, nullIdx: KeyNotFound}
+	return &GenericBinaryMemoTable[T]{tbl: NewHashTable[int32](uint64(initial)), builder: bldr, nullIdx: KeyNotFound}
 }
 
 func (GenericBinaryMemoTable[T]) TypeTraits() TypeTraits {
@@ -72,40 +75,9 @@ func (s *GenericBinaryMemoTable[T]) Size() int {
 	return sz
 }
 
-// helper function to easily return a byte slice for any given value
-// regardless of the type if it's a []byte, string, or fulfills the
-// ByteSlice interface.
-func (GenericBinaryMemoTable[T]) valAsByteSlice(val interface{}) []byte {
-	switch v := val.(type) {
-	case []byte:
-		return v
-	case ByteSlice:
-		return v.Bytes()
-	case string:
-		var out []byte
-		h := (*reflect.StringHeader)(unsafe.Pointer(&v))
-		s := (*reflect.SliceHeader)(unsafe.Pointer(&out))
-		s.Data = h.Data
-		s.Len = h.Len
-		s.Cap = h.Len
-		return out
-	default:
-		panic("invalid type for binarymemotable")
-	}
-}
-
 // helper function to get the hash value regardless of the underlying binary type
-func (GenericBinaryMemoTable[T]) getHash(val interface{}) uint64 {
-	switch v := val.(type) {
-	case string:
-		return hashString(v, 0)
-	case []byte:
-		return Hash(v, 0)
-	case ByteSlice:
-		return Hash(v.Bytes(), 0)
-	default:
-		panic("invalid type for binarymemotable")
-	}
+func (GenericBinaryMemoTable[T]) getHash(val T) uint64 {
+	return Hash([]byte(val), 0)
 }
 
 // helper function to append the given value to the builder regardless
@@ -114,7 +86,7 @@ func (b *GenericBinaryMemoTable[T]) appendVal(val T) {
 	b.builder.Append(val)
 }
 
-func (b *GenericBinaryMemoTable[T]) lookup(h uint64, val []byte) (*entryInt32, bool) {
+func (b *GenericBinaryMemoTable[T]) lookup(h uint64, val []byte) (*entry[int32], bool) {
 	return b.tbl.Lookup(h, func(i int32) bool {
 		return bytes.Equal(val, b.builder.Value(int(i)))
 	})
@@ -123,7 +95,7 @@ func (b *GenericBinaryMemoTable[T]) lookup(h uint64, val []byte) (*entryInt32, b
 // Get returns the index of the specified value in the table or KeyNotFound,
 // and a boolean indicating whether it was found in the table.
 func (b *GenericBinaryMemoTable[T]) Get(val T) (int, bool) {
-	if p, ok := b.lookup(b.getHash(val), b.valAsByteSlice(val)); ok {
+	if p, ok := b.lookup(b.getHash(val), []byte(val)); ok {
 		return int(p.payload.val), ok
 	}
 	return KeyNotFound, false
@@ -134,7 +106,7 @@ func (b *GenericBinaryMemoTable[T]) Get(val T) (int, bool) {
 // was found in the table (true) or inserted (false) along with any possible error.
 func (b *GenericBinaryMemoTable[T]) GetOrInsert(val T) (idx int, found bool, err error) {
 	h := b.getHash(val)
-	p, found := b.lookup(h, b.valAsByteSlice(val))
+	p, found := b.lookup(h, []byte(val))
 	if found {
 		idx = int(p.payload.val)
 	} else {
@@ -236,13 +208,13 @@ func (b *GenericBinaryMemoTable[T]) CopyLargeOffsetsSubset(start int, out []int6
 
 // CopyValues copies the raw binary data bytes out, out should be a []byte
 // with at least ValuesSize bytes allocated to copy into.
-func (b *GenericBinaryMemoTable[T]) CopyValues(out interface{}) {
+func (b *GenericBinaryMemoTable[T]) CopyValues(out []byte) {
 	b.CopyValuesSubset(0, out)
 }
 
 // CopyValuesSubset copies the raw binary data bytes out starting with the value
 // at the index start, out should be a []byte with at least ValuesSize bytes allocated
-func (b *GenericBinaryMemoTable[T]) CopyValuesSubset(start int, out interface{}) {
+func (b *GenericBinaryMemoTable[T]) CopyValuesSubset(start int, out []byte) {
 	if b.builder.Len() <= start {
 		return
 	}
@@ -253,8 +225,7 @@ func (b *GenericBinaryMemoTable[T]) CopyValuesSubset(start int, out interface{})
 		length = b.builder.DataLen() - int(offset-first)
 	)
 
-	outval := out.([]byte)
-	copy(outval, b.builder.Value(start)[0:length])
+	copy(out, b.builder.Value(start)[0:length])
 }
 
 func (b *GenericBinaryMemoTable[T]) WriteOut(out []byte) {
