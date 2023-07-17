@@ -40,7 +40,7 @@ type ByteSlice interface {
 //
 // Values will remember the order they are inserted to generate a valid
 // dictionary.
-type MemoTable interface {
+type MemoTable[T any] interface {
 	TypeTraits() TypeTraits
 	// Reset drops everything in the table allowing it to be reused
 	Reset()
@@ -52,7 +52,7 @@ type MemoTable interface {
 	// and a boolean indicating whether or not the value was found in
 	// the table (if false, the value was inserted). An error is returned
 	// if val is not the appropriate type for the table.
-	GetOrInsert(val interface{}) (idx int, existed bool, err error)
+	GetOrInsert(val T) (idx int, existed bool, err error)
 	// GetOrInsertNull returns the index of the null value in the table,
 	// inserting one if it hasn't already been inserted. It returns a boolean
 	// indicating if the null value already existed or not in the table.
@@ -69,8 +69,8 @@ type MemoTable interface {
 	WriteOutSubset(offset int, out []byte)
 }
 
-type NumericMemoTable interface {
-	MemoTable
+type NumericMemoTable[T any] interface {
+	MemoTable[T]
 	WriteOutLE(out []byte)
 	WriteOutSubsetLE(offset int, out []byte)
 }
